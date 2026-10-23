@@ -1,29 +1,24 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
+  # Ollama runs NATIVELY on the Mac (Metal GPU). Containers cannot use the Apple GPU.
+  # This proxy is the only path from the sandbox to the host: /v1/* only.
+  model-proxy:
+    image: nginx:alpine
     volumes:
-      - ollama:/root/.ollama
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
-      - internal   # sandbox reach model here
-      - egress     # only ollama has internet (model pull)
-    # GPU (NVIDIA container toolkit required). Remove block for CPU.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - internal   # sandbox side
+      - hostnet    # host side (reaches native Ollama)
     restart: unless-stopped
 
   sandbox:
     build: .
     depends_on:
-      - ollama
+      - model-proxy
     environment:
-      OPENAI_BASE_URL: http://ollama:11434/v1
+      OPENAI_BASE_URL: http://model-proxy:11434/v1
       OPENAI_API_KEY: ollama
-      OLLAMA_HOST: http://ollama:11434
     volumes:
       - ./workspace:/work     # only thing agent can touch
     networks:
@@ -32,6 +27,9 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    pids_limit: 512
+    mem_limit: 8g
+    cpus: 4
     tmpfs:
       - /tmp
       - /home/agent/.local/state:uid=1000,gid=1000
@@ -43,7 +41,4 @@ services:
 networks:
   internal:
     internal: true
-  egress: {}
-
-volumes:
-  ollama:
+  hostnet: {}

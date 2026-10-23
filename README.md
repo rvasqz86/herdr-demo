@@ -1,49 +1,57 @@
 # herdr-demo
 
-Sandboxed AI coding agent environment: [herdr](https://github.com/creator-engine/herdr-ce) (terminal agent multiplexer) + local model via Ollama. Agent container has no internet; it can reach only the Ollama container.
+Sandboxed AI coding agent environment for macOS (Apple silicon): [herdr](https://github.com/creator-engine/herdr-ce) (terminal agent multiplexer) + local model via native Ollama. The agent container has no internet. Its only network path is an nginx proxy to the host Ollama `/v1/*` API.
 
 ## Layout
 
-- `docker-compose.yml` — `ollama` (GPU, internet for model pull) + `sandbox` (internal network only)
-- `Dockerfile` — sandbox image: herdr + opencode, non-root user
-- `pick-model.sh` — detect free VRAM (or RAM) and pull the biggest fitting model
-- `workspace/` — only directory the agent can write
+- `docker-compose.yml`: `model-proxy` (nginx, bridges to host Ollama) + `sandbox` (internal network only)
+- `nginx.conf`: allows `/v1/*` only
+- `Dockerfile`: sandbox image with herdr and opencode, non-root user
+- `pick-model.sh`: picks model size from memory, pulls with native Ollama
+- `workspace/`: only directory the agent can write
+
+## Why Ollama is not in a container
+
+Containers on macOS run in a Linux VM and cannot use the Apple GPU. Native Ollama uses Metal, which is much faster.
 
 ## Prereqs
 
-- Docker or rootless Podman with compose (`podman compose`)
-- NVIDIA GPU: container toolkit (Docker) or CDI (Podman). No GPU: delete the `deploy:` block in compose.
+- Ollama app installed on the Mac
+- Docker Desktop, or Podman with `podman machine` and `podman compose`
 
 ## Run
 
 ```bash
+ollama serve &                         # skip if the Ollama app is already running
+./pick-model.sh                        # pulls e.g. qwen2.5-coder:14b
 mkdir -p workspace
-docker compose up -d --build
-./pick-model.sh                      # pulls e.g. qwen2.5-coder:14b
+docker compose up -d --build           # or: podman compose up -d --build
 docker compose exec -it sandbox herdr
 ```
+
+If the proxy cannot reach Ollama (`502`), start Ollama with `OLLAMA_HOST=0.0.0.0 ollama serve`. This exposes it on your LAN, so enable the macOS firewall.
 
 Detach herdr; agents keep running. Reattach with the same `exec` command.
 
 ## Verify sandbox
 
 ```bash
-docker compose exec sandbox id                                   # non-root
-docker compose exec sandbox curl -m3 https://example.com         # must fail
-docker compose exec sandbox ls ~/.ssh                            # must not exist
-docker inspect $(docker compose ps -q sandbox) | grep -iE 'CapDrop|ReadonlyRootfs'
+docker compose exec sandbox id                                          # non-root
+docker compose exec sandbox curl -m3 https://example.com                # must fail
+docker compose exec sandbox curl -m3 http://model-proxy:11434/v1/models # must work
+docker compose exec sandbox curl -m3 http://model-proxy:11434/api/tags  # must be 403
+docker compose exec sandbox ls ~/.ssh                                   # must not exist
 ```
 
 ## Security notes
 
-- Container isolation, not VM isolation: shared host kernel. For untrusted code use a microVM runtime (`krun`, `runsc`) or Docker `sbx`.
-- Sandbox can reach the full Ollama API, not just `/v1`. Put an nginx proxy exposing only `/v1/*` in front for tighter control.
+- Container isolation, not VM isolation: shared kernel inside the Docker/Podman VM. The VM itself is a boundary from macOS, which helps.
 - Review `git diff` on the host before running anything the agent wrote (hooks, Makefile, scripts).
-- Compose `deploy:`, `read_only`, and tmpfs options may be ignored by `podman compose`; check with `podman inspect`.
+- `podman compose` may ignore some options (`read_only`, tmpfs uid, limits). Check with `podman inspect`.
 
 ## TODO before first build
 
 - Confirm herdr install command on herdr.dev; the URL in `Dockerfile` is unverified.
 - Confirm the `opencode-ai` npm package name.
+- Configure opencode to use `OPENAI_BASE_URL` and the model in `.model`.
 - Pin base image digest and tool versions.
-- `pick-model.sh` calls `docker compose`; swap to `podman compose` for Podman.
