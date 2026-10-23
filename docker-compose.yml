@@ -1,0 +1,49 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    networks:
+      - internal   # sandbox reach model here
+      - egress     # only ollama has internet (model pull)
+    # GPU (NVIDIA container toolkit required). Remove block for CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  sandbox:
+    build: .
+    depends_on:
+      - ollama
+    environment:
+      OPENAI_BASE_URL: http://ollama:11434/v1
+      OPENAI_API_KEY: ollama
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ./workspace:/work     # only thing agent can touch
+    networks:
+      - internal              # no internet
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/agent/.local/state:uid=1000,gid=1000
+      - /home/agent/.cache:uid=1000,gid=1000
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+networks:
+  internal:
+    internal: true
+  egress: {}
+
+volumes:
+  ollama:
