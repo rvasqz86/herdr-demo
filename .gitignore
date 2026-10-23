@@ -2,3 +2,5 @@ workspace/*
 !workspace/.gitkeep
 .model
 .env
+certs/*.crt
+certs/*.pem

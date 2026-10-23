@@ -10,6 +10,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl git ca-certificates bash \
  && rm -rf /var/lib/apt/lists/*
 
+# Optional company root CA(s): put *.crt files in certs/ (see README). Keeps TLS verification ON
+# on networks that re-sign HTTPS traffic. With no certs this step is a no-op.
+COPY certs/ /usr/local/share/ca-certificates/corp/
+RUN update-ca-certificates
+# Node ships its own CA bundle; point it at the system bundle that now includes the company CA.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 # herdr: official install script puts the binary in ~/.local/bin of the installing user.
 # Build runs as root, so move it onto the system PATH for the agent user. Fail loudly if missing.
 RUN curl -fsSL https://herdr.dev/install.sh | sh \

@@ -41,6 +41,19 @@ podman compose exec sandbox curl -sS -m5 --noproxy '*' -I https://api.github.com
 podman compose exec sandbox ls ~/.ssh                                     # must not exist
 ```
 
+## Company network that re-signs HTTPS (TLS inspection)
+
+Symptom during build or in the sandbox: `curl: (60) SSL certificate problem` or `unable to get local issuer certificate`. Do not use `curl -k`; that turns off verification, including for `curl | sh` installers run as root. Trust the company root CA instead.
+
+Export it from your Mac (replace the name with your proxy vendor's cert, for example Zscaler; list candidates with `security find-certificate -a -p /Library/Keychains/System.keychain | grep -c BEGIN`):
+
+```bash
+security find-certificate -a -c "Zscaler" -p /Library/Keychains/System.keychain > certs/corp-ca.crt
+./install.sh --rebuild
+```
+
+Files in `certs/*.crt` are installed into the image trust store and used by Node. They are git-ignored. Ask IT for the exact root CA file if unsure. If the podman machine's own image pulls fail with the same error, the VM needs the cert too (`podman machine ssh`, then add it under `/etc/pki/ca-trust/source/anchors/` and run `update-ca-trust`).
+
 ## Tune the allowlist
 
 Watch what the proxy blocks while using Copilot:
