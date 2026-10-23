@@ -1,33 +1,84 @@
 #!/usr/bin/env bash
 # install.sh — build and start the herdr + Copilot CLI sandbox, then verify the isolation.
 #
-# Usage: ./install.sh [--rebuild] [--verify] [--down] [-h]
-#   (no flags)  create workspace/, build images, start containers, run verification
-#   --rebuild   build with --no-cache first
-#   --verify    only run the verification checks against running containers
-#   --down      stop and remove containers (keeps the login volume)
-#   -h          help
+# Usage: ./install.sh [--ca NAME | --ca-file PATH] [--list-ca] [--rebuild] [--verify] [--down] [-h]
+#   (no flags)       create workspace/, build images, start containers, run verification
+#   --ca NAME        export company root CA(s) whose name matches NAME from the macOS System
+#                    keychain into certs/corp-ca.crt, then rebuild (e.g. --ca Zscaler)
+#   --ca-file PATH   copy a root CA file (PEM) into certs/corp-ca.crt, then rebuild
+#   --list-ca        list certificate names in the macOS System keychain, then exit
+#   --rebuild        build with --no-cache first
+#   --verify         only run the verification checks against running containers
+#   --down           stop and remove containers (keeps the login volume)
+#   -h               help
 # Env:
-#   COMPOSE=...   compose command, e.g. "docker compose" (default: auto-detect podman, then docker)
+#   COMPOSE=...      compose command, e.g. "docker compose" (default: auto-detect podman, then docker)
+#
+# Use --ca on networks that re-sign HTTPS (curl error 60). It keeps TLS verification ON; never use curl -k.
 set -euo pipefail
 
-REBUILD=0; VERIFY_ONLY=0; DOWN=0
+REBUILD=0; VERIFY_ONLY=0; DOWN=0; LIST_CA=0; CA_NAME=""; CA_FILE=""
 
 die()  { echo "error: $*" >&2; exit 1; }
+warn() { echo "warn: $*" >&2; }
 info() { echo "==> $*"; }
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
-for arg in "$@"; do
-  case "$arg" in
-    --rebuild) REBUILD=1 ;;
-    --verify)  VERIFY_ONLY=1 ;;
-    --down)    DOWN=1 ;;
-    -h|--help) usage; exit 0 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ca)       [ $# -ge 2 ] || die "--ca needs a name, e.g. --ca Zscaler"; CA_NAME="$2"; shift ;;
+    --ca-file)  [ $# -ge 2 ] || die "--ca-file needs a path"; CA_FILE="$2"; shift ;;
+    --list-ca)  LIST_CA=1 ;;
+    --rebuild)  REBUILD=1 ;;
+    --verify)   VERIFY_ONLY=1 ;;
+    --down)     DOWN=1 ;;
+    -h|--help)  usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
+  shift
 done
 
 cd "$(dirname "$0")"
+
+# ---- company CA handling (no container runtime needed) ----------------------
+KEYCHAIN=/Library/Keychains/System.keychain
+CA_OUT=certs/corp-ca.crt
+
+count_certs() { grep -c 'BEGIN CERTIFICATE' "$1" 2>/dev/null || true; }
+
+if [ "$LIST_CA" -eq 1 ]; then
+  [ "$(uname -s)" = "Darwin" ] || die "--list-ca needs macOS (uses the System keychain)"
+  info "certificates in the System keychain (look for your company or proxy vendor):"
+  security find-certificate -a "$KEYCHAIN" | sed -n 's/.*"labl"<blob>="\(.*\)"/  \1/p' | sort -u
+  echo "Then: ./install.sh --ca \"<name>\""
+  exit 0
+fi
+
+if [ -n "$CA_NAME" ] && [ -n "$CA_FILE" ]; then die "use either --ca or --ca-file, not both"; fi
+
+if [ -n "$CA_NAME" ] || [ -n "$CA_FILE" ]; then
+  mkdir -p certs
+  tmp="$(mktemp "${TMPDIR:-/tmp}/ca.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
+  if [ -n "$CA_NAME" ]; then
+    [ "$(uname -s)" = "Darwin" ] || die "--ca needs macOS (System keychain). Use --ca-file PATH instead"
+    info "exporting certificates matching '$CA_NAME' from the System keychain"
+    security find-certificate -a -c "$CA_NAME" -p "$KEYCHAIN" > "$tmp" 2>/dev/null || true
+    [ "$(count_certs "$tmp")" -gt 0 ] || die "no certificate named '$CA_NAME' found. Run: ./install.sh --list-ca"
+  else
+    [ -r "$CA_FILE" ] || die "cannot read $CA_FILE"
+    cp "$CA_FILE" "$tmp"
+    [ "$(count_certs "$tmp")" -gt 0 ] || die "$CA_FILE is not a PEM certificate (no BEGIN CERTIFICATE). Convert DER with: openssl x509 -inform der -in file.cer -out file.pem"
+  fi
+  n="$(count_certs "$tmp")"
+  [ "$n" -le 5 ] || warn "$n certificates matched; the name may be too broad. Check $CA_OUT"
+  install -m 0644 "$tmp" "$CA_OUT"
+  info "wrote $n certificate(s) to $CA_OUT (git-ignored)"
+  REBUILD=1   # image trust store must be rebuilt
+  if [ "$(uname -s)" = "Darwin" ]; then
+    echo "note: if podman image pulls fail with a certificate error, the Podman VM needs the CA too (see README)."
+  fi
+fi
 
 # ---- pick a container runtime ----------------------------------------------
 if [ -z "${COMPOSE:-}" ]; then
@@ -120,8 +171,7 @@ if verify; then
   echo "  then in a pane: copilot   (first time: /login)"
 else
   echo
-  warn_msg="some checks failed. Proxy log: $COMPOSE logs egress-proxy"
-  echo "warn: $warn_msg" >&2
+  echo "warn: some checks failed. Proxy log: $COMPOSE logs egress-proxy" >&2
   echo "The sandbox is running, but do not demo until the FAIL lines are fixed." >&2
   exit 1
 fi

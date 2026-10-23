@@ -45,12 +45,15 @@ podman compose exec sandbox ls ~/.ssh                                     # must
 
 Symptom during build or in the sandbox: `curl: (60) SSL certificate problem` or `unable to get local issuer certificate`. Do not use `curl -k`; that turns off verification, including for `curl | sh` installers run as root. Trust the company root CA instead.
 
-Export it from your Mac (replace the name with your proxy vendor's cert, for example Zscaler; list candidates with `security find-certificate -a -p /Library/Keychains/System.keychain | grep -c BEGIN`):
+`install.sh` does it for you:
 
 ```bash
-security find-certificate -a -c "Zscaler" -p /Library/Keychains/System.keychain > certs/corp-ca.crt
-./install.sh --rebuild
+./install.sh --list-ca               # list certificate names in the macOS System keychain
+./install.sh --ca "Zscaler"          # export matching root CA(s) to certs/corp-ca.crt, rebuild, start, verify
+./install.sh --ca-file ~/corp-ca.pem # or use a PEM file from IT
 ```
+
+Use your proxy vendor's cert name in place of `Zscaler`. If IT gives you a DER `.cer`, convert it: `openssl x509 -inform der -in file.cer -out file.pem`.
 
 Files in `certs/*.crt` are installed into the image trust store and used by Node. They are git-ignored. Ask IT for the exact root CA file if unsure. If the podman machine's own image pulls fail with the same error, the VM needs the cert too (`podman machine ssh`, then add it under `/etc/pki/ca-trust/source/anchors/` and run `update-ca-trust`).
 
