@@ -20,8 +20,10 @@ ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 # herdr: official install script puts the binary in ~/.local/bin of the installing user.
 # Build runs as root, so move it onto the system PATH for the agent user. Fail loudly if missing.
 RUN curl -fsSL https://herdr.dev/install.sh | sh \
- && BIN="$(command -v herdr || ls /root/.local/bin/herdr /usr/local/bin/herdr 2>/dev/null | head -1)" \
- && test -n "$BIN" \
+ && for p in "$(command -v herdr || true)" /root/.local/bin/herdr /usr/local/bin/herdr; do \
+      if [ -n "$p" ] && [ -x "$p" ]; then BIN="$p"; break; fi; \
+    done \
+ && test -n "${BIN:-}" \
  && { [ "$BIN" = /usr/local/bin/herdr ] || install -m 0755 "$BIN" /usr/local/bin/herdr; } \
  && test -x /usr/local/bin/herdr
 
