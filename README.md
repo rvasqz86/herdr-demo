@@ -27,9 +27,17 @@ podman compose exec -it sandbox herdr
 
 `install.sh` options: `--rebuild` (no cache), `--verify` (checks only), `--down` (stop containers). It auto-detects podman, then docker; override with `COMPOSE="docker compose"`.
 
-In a herdr pane, run `copilot`, then `/login` and follow the device-flow prompts. The login is kept in the `agent-home` volume. Work happens in `/work` (your `workspace/`).
+In a herdr pane, first time only, run:
 
-Optional PAT instead of `/login`: fine-grained token with **Copilot Requests**, owned by a personal account (not an organization). Pass it with `podman compose run -e COPILOT_GITHUB_TOKEN=... sandbox`. The agent can read it, so use a short-lived token. If your seat is through the company, use `/login`.
+```bash
+copilot login --device-code
+```
+
+It prints a one-time code and `https://github.com/login/device`. Open that URL in your normal browser on the Mac, enter the code, approve. Then run `copilot`. Do not use the default browser flow in a container: it redirects to `localhost` on your Mac, where nothing is listening for the container. Device code needs no callback.
+
+The container has no OS keychain, so the CLI offers to store the token in `~/.copilot/config.json`. Accept; it lives in the `agent-home` volume and survives restarts. Work happens in `/work` (your `workspace/`).
+
+Optional PAT instead of `copilot login`: fine-grained token with **Copilot Requests**, owned by a personal account (not an organization). Pass it with `podman compose run -e COPILOT_GITHUB_TOKEN=... sandbox`. The agent can read it, so use a short-lived token. If your seat is through the company, use `copilot login --device-code`.
 
 ## Verify the sandbox
 

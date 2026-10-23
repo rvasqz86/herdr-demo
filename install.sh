@@ -179,7 +179,8 @@ if verify; then
   echo
   info "ready. Start herdr:"
   echo "    $COMPOSE exec -it sandbox herdr"
-  echo "  then in a pane: copilot   (first time: /login)"
+  echo "  then in a pane, first time only:  copilot login --device-code"
+  echo "  (open the printed URL on your Mac, enter the code), then run: copilot"
 else
   echo
   echo "warn: some checks failed. Proxy log: $COMPOSE logs egress-proxy" >&2
