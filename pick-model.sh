@@ -13,7 +13,17 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 # Available RAM in GB
-ram_gb=$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo)
+if [ -r /proc/meminfo ]; then
+  # Linux
+  ram_gb=$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo)
+elif command -v sysctl >/dev/null 2>&1 && sysctl -n hw.memsize >/dev/null 2>&1; then
+  # macOS: total RAM (no MemAvailable equivalent), take 70% as available
+  ram_gb=$(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 * 7 / 10 ))
+else
+  echo "cannot detect RAM; set RAM_GB=<n> and rerun" >&2
+  ram_gb=${RAM_GB:?}
+fi
+ram_gb=${RAM_GB:-$ram_gb}   # manual override
 
 if [ "$vram_gb" -gt 0 ]; then
   budget=$vram_gb
