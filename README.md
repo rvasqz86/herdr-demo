@@ -24,14 +24,16 @@ Containers on macOS run in a Linux VM with no access to the Apple GPU. Ollama in
 brew install ollama podman podman-compose
 podman machine start                       # if not already running
 mkdir -p workspace
-./pick-model.sh -w                         # starts Ollama, pulls a fitting model, warms it, shows GPU use
+./pick-model.sh                            # starts Ollama, pulls a fitting model, verifies it runs on GPU
 podman compose up -d --build
 podman compose exec -it sandbox herdr
 ```
 
 Docker Desktop instead: `export OLLAMA_UPSTREAM=http://host.docker.internal:11434` and use `docker compose`.
 
-`pick-model.sh` options: `-n` dry run, `-s 7b` force size, `-f llama3.1` other family, `-w` warm up and show GPU use, `RAM_GB=16` override memory. It starts `ollama serve` with light settings (`KEEP_ALIVE=2m`, one parallel request, one loaded model) if Ollama is not running, checks disk, and falls back to a smaller size if a pull fails.
+`pick-model.sh` options: `-n` dry run, `-s 7b` force starting size, `-f llama3.1` other family, `-k` skip the GPU check, `RAM_GB=16` override memory. It starts `ollama serve` with light settings (`KEEP_ALIVE=2m`, one parallel request, one loaded model) if Ollama is not running, checks disk, and falls back to a smaller size if a pull fails.
+
+GPU check: after pulling, the script loads the model with a 1-token request and reads `ollama ps`. If the PROCESSOR column is not `100% GPU` (model spilled to CPU), it unloads it and tries the next smaller size. It only enforces this on Apple silicon or NVIDIA hosts.
 
 ## If the proxy cannot reach Ollama (502)
 

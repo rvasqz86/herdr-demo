@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
-# pick-model.sh — pick the biggest model that fits this Mac and pull it with native Ollama (Metal GPU).
+# pick-model.sh — pick the biggest model that fits this Mac, pull it with native Ollama, and
+# verify it actually runs on the GPU (Metal). If it spills to CPU, drop to a smaller size.
 #
-# Usage: ./pick-model.sh [-f family] [-s size] [-w] [-n] [-h]
+# Usage: ./pick-model.sh [-f family] [-s size] [-k] [-n] [-h]
 #   -f family   model family (default: qwen2.5-coder)
-#   -s size     force a size tag, e.g. 7b (still falls back smaller on failure)
-#   -w          warm up: load the model and show whether it runs on GPU
+#   -s size     force a starting size tag, e.g. 7b (still falls back smaller on failure)
+#   -k          skip the warm-up and GPU check
 #   -n          dry run: print the choice, pull nothing
 #   -h          help
 # Env:
-#   RAM_GB=16   override detected memory
+#   RAM_GB=16        override detected memory
+#   REQUIRE_GPU=1    enforce the GPU check even when no GPU is detected
 set -euo pipefail
 
 FAMILY="qwen2.5-coder"
 FORCE_SIZE=""
 DRY_RUN=0
-WARM=0
+SKIP_CHECK=0
 OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
 
 die()  { echo "error: $*" >&2; exit 1; }
 warn() { echo "warn: $*" >&2; }
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; }
 is_int() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
 
-while getopts "f:s:wnh" opt; do
+while getopts "f:s:knh" opt; do
   case "$opt" in
     f) FAMILY="$OPTARG" ;;
     s) FORCE_SIZE="$OPTARG" ;;
-    w) WARM=1 ;;
+    k) SKIP_CHECK=1 ;;
     n) DRY_RUN=1 ;;
     h) usage; exit 0 ;;
     *) usage; exit 2 ;;
@@ -65,15 +67,17 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   is_int "$mb" && vram_gb=$(( mb / 1024 ))
 fi
 
+gpu_expected=0
 if [ "$vram_gb" -gt 0 ]; then
-  budget=$vram_gb;                src="NVIDIA free VRAM"
+  budget=$vram_gb;                src="NVIDIA free VRAM";                          gpu_expected=1
 elif [ "$OS" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
   # Apple silicon unified memory: Metal can use roughly 65-75% of total
-  budget=$(( total * 65 / 100 )); src="Apple unified memory (65% of ${total}GB)"
+  budget=$(( total * 65 / 100 )); src="Apple unified memory (65% of ${total}GB)";  gpu_expected=1
 else
-  [ "$OS" = "Darwin" ] && warn "Intel Mac: no Metal acceleration in Ollama, expect CPU speed"
+  [ "$OS" = "Darwin" ] && warn "Intel Mac: Ollama has no Metal acceleration here, expect CPU speed"
   budget=$(( total * 6 / 10 ));   src="RAM, CPU only (60% of ${total}GB)"
 fi
+[ "${REQUIRE_GPU:-0}" = "1" ] && gpu_expected=1
 
 # ---- pick starting rung -----------------------------------------------------
 start=-1
@@ -92,7 +96,7 @@ echo "memory budget: ${budget}GB (${src})"
 echo "family: ${FAMILY}, starting at: ${SIZES[$start]}"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "dry run: would pull ${FAMILY}:${SIZES[$start]} (falls back smaller on failure)"
+  echo "dry run: would pull ${FAMILY}:${SIZES[$start]} (falls back smaller on failure or CPU spill)"
   exit 0
 fi
 
@@ -121,43 +125,58 @@ free_gb=0
 is_int "${free_kb:-}" && free_gb=$(( free_kb / 1024 / 1024 ))
 echo "free disk: ${free_gb}GB in ${disk_dir}"
 
-# ---- pull with fallback -----------------------------------------------------
+# ---- GPU check --------------------------------------------------------------
+# Load the model with a 1-token request, then read the PROCESSOR column of `ollama ps`.
+# Returns 0 if fully on GPU, 1 if it spills to CPU or the check cannot run.
+gpu_ok() {
+  local model="$1" line
+  curl -fsS -m 300 "$OLLAMA_URL/api/generate" \
+    -d "{\"model\":\"$model\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" \
+    >/dev/null 2>&1 || { warn "warm-up request failed for $model"; return 1; }
+  line=$(ollama ps 2>/dev/null | awk -v m="$model" '$1 == m')
+  [ -n "$line" ] || { warn "$model not shown by 'ollama ps' after warm-up"; return 1; }
+  echo "  ollama ps: $(echo "$line" | tr -s ' ')"
+  echo "$line" | grep -q "100% GPU"
+}
+
+# ---- pull, verify, fall back ------------------------------------------------
 chosen=""
 for (( i=start; i<${#SIZES[@]}; i++ )); do
   size="${SIZES[$i]}"; model="${FAMILY}:${size}"
 
-  if ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$model"; then
-    echo "already installed: $model"; chosen="$model"; break
+  if ! ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$model"; then
+    need=$(( ${DISK_GB[$i]} + 2 ))
+    if [ "$free_gb" -gt 0 ] && [ "$free_gb" -lt "$need" ]; then
+      warn "skip $model: needs ~${need}GB free, have ${free_gb}GB"
+      continue
+    fi
+    echo "pulling: $model"
+    if ! ollama pull "$model"; then
+      warn "pull failed for $model (no such tag, network, or disk). Trying a smaller size."
+      continue
+    fi
+  else
+    echo "already installed: $model"
   fi
 
-  need=$(( ${DISK_GB[$i]} + 2 ))
-  if [ "$free_gb" -gt 0 ] && [ "$free_gb" -lt "$need" ]; then
-    warn "skip $model: needs ~${need}GB free, have ${free_gb}GB"
-    continue
-  fi
-
-  echo "pulling: $model"
-  if ollama pull "$model"; then
+  if [ "$SKIP_CHECK" -eq 1 ] || [ "$gpu_expected" -eq 0 ]; then
     chosen="$model"; break
   fi
-  warn "pull failed for $model (no such tag, network, or disk). Trying a smaller size."
+
+  echo "checking GPU use for $model ..."
+  if gpu_ok "$model"; then
+    echo "  GPU check passed (100% GPU)"
+    chosen="$model"; break
+  fi
+  warn "$model does not run fully on GPU (too big for free memory). Trying a smaller size."
+  ollama stop "$model" >/dev/null 2>&1 || true
 done
 
-[ -n "$chosen" ] || die "no model could be pulled for family '$FAMILY'"
+[ -n "$chosen" ] || die "no model for family '$FAMILY' pulled and ran on GPU. Free memory (close apps) or use -k to skip the GPU check"
 
 curl -fsS -m 5 "$OLLAMA_URL/api/tags" | grep -q "\"$chosen\"" \
-  || warn "$chosen not listed by server after pull; check 'ollama list'"
+  || warn "$chosen not listed by server; check 'ollama list'"
 
 tmp=$(mktemp "${TMPDIR:-/tmp}/model.XXXXXX")
 echo "$chosen" > "$tmp" && mv "$tmp" .model
 echo "done. model: $chosen (saved to .model)"
-
-# ---- optional warm-up: load model, confirm GPU ------------------------------
-if [ "$WARM" -eq 1 ]; then
-  echo "warming up $chosen ..."
-  curl -fsS -m 300 "$OLLAMA_URL/api/generate" \
-    -d "{\"model\":\"$chosen\",\"prompt\":\"hi\",\"stream\":false,\"options\":{\"num_predict\":1}}" >/dev/null \
-    || warn "warm-up request failed"
-  ollama ps
-  echo "PROCESSOR column should read 100% GPU. CPU split means the model is too big; rerun with a smaller -s."
-fi
