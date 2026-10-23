@@ -21,10 +21,11 @@ sandbox --(internal net, no route out)--> egress-proxy (Squid, domain allowlist)
 ## Run
 
 ```bash
-mkdir -p workspace
-podman compose up -d --build        # or: docker compose up -d --build
+./install.sh                        # creates workspace/, builds, starts, runs the isolation checks
 podman compose exec -it sandbox herdr
 ```
+
+`install.sh` options: `--rebuild` (no cache), `--verify` (checks only), `--down` (stop containers). It auto-detects podman, then docker; override with `COMPOSE="docker compose"`.
 
 In a herdr pane, run `copilot`, then `/login` and follow the device-flow prompts. The login is kept in the `agent-home` volume. Work happens in `/work` (your `workspace/`).
 
