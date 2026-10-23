@@ -41,6 +41,19 @@ podman compose exec sandbox curl -sS -m5 --noproxy '*' -I https://api.github.com
 podman compose exec sandbox ls ~/.ssh                                     # must not exist
 ```
 
+## Prebuilt image (skip the local build)
+
+GitHub Actions builds the sandbox image for `linux/arm64` (Apple silicon) and `linux/amd64` on every change to the `Dockerfile` and publishes it to `ghcr.io/rvasqz86/herdr-demo-sandbox`. Use it when building locally fails because your network blocks the build-time downloads:
+
+```bash
+./install.sh --pull
+```
+
+- First publish: Actions tab, workflow **Build sandbox image**, wait for green. Then GitHub, your profile, Packages, `herdr-demo-sandbox`, Package settings, set visibility to **Public** (or keep it private and run `podman login ghcr.io` with a token that has `read:packages`).
+- Company CA with a pulled image: run `./install.sh --pull --ca-file ~/corp-ca.pem`. The cert is mounted from `certs/` at runtime; no rebuild.
+- Pulling from ghcr.io must be allowed on your network. The proxy image (`ubuntu/squid`) still comes from Docker Hub.
+- Pin by digest or `:<commit-sha>` for a demo: `SANDBOX_IMAGE=ghcr.io/rvasqz86/herdr-demo-sandbox:<sha> ./install.sh --pull`.
+
 ## Company network that re-signs HTTPS (TLS inspection)
 
 Symptom during build or in the sandbox: `curl: (60) SSL certificate problem` or `unable to get local issuer certificate`. Do not use `curl -k`; that turns off verification, including for `curl | sh` installers run as root. Trust the company root CA instead.

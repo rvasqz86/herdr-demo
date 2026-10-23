@@ -11,6 +11,9 @@ services:
     restart: unless-stopped
 
   sandbox:
+    # Prebuilt multi-arch image from GitHub Actions (see .github/workflows/image.yml).
+    # `./install.sh --pull` uses it; the default `./install.sh` builds locally and tags the same name.
+    image: ${SANDBOX_IMAGE:-ghcr.io/rvasqz86/herdr-demo-sandbox:latest}
     build: .
     depends_on:
       - egress-proxy
@@ -21,7 +24,9 @@ services:
       http_proxy: http://egress-proxy:3128
       NO_PROXY: localhost,127.0.0.1
       NODE_USE_ENV_PROXY: "1"   # make Node's fetch honor the proxy variables
+      NODE_EXTRA_CA_CERTS: /certs/corp-ca.crt   # runtime company CA (ignored with a warning if absent)
     volumes:
+      - ./certs:/certs:ro       # company root CA for prebuilt images; see README
       - ./workspace:/work       # only host dir the agent can touch
       - agent-home:/home/agent  # login (/login) and herdr state persist here
     networks:

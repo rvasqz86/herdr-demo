@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # install.sh — build and start the herdr + Copilot CLI sandbox, then verify the isolation.
 #
-# Usage: ./install.sh [--ca NAME | --ca-file PATH] [--list-ca] [--rebuild] [--verify] [--down] [-h]
+# Usage: ./install.sh [--pull] [--ca NAME | --ca-file PATH] [--list-ca] [--rebuild] [--verify] [--down] [-h]
 #   (no flags)       create workspace/, build images, start containers, run verification
 #   --ca NAME        export company root CA(s) whose name matches NAME from the macOS System
 #                    keychain into certs/corp-ca.crt, then rebuild (e.g. --ca Zscaler)
 #   --ca-file PATH   copy a root CA file (PEM) into certs/corp-ca.crt, then rebuild
 #   --list-ca        list certificate names in the macOS System keychain, then exit
+#   --pull           use the prebuilt image from ghcr.io instead of building (no build-time downloads)
 #   --rebuild        build with --no-cache first
-#   --verify         only run the verification checks against running containers
+#   --verify        only run the verification checks against running containers
 #   --down           stop and remove containers (keeps the login volume)
 #   -h               help
 # Env:
@@ -17,18 +18,19 @@
 # Use --ca on networks that re-sign HTTPS (curl error 60). It keeps TLS verification ON; never use curl -k.
 set -euo pipefail
 
-REBUILD=0; VERIFY_ONLY=0; DOWN=0; LIST_CA=0; CA_NAME=""; CA_FILE=""
+REBUILD=0; VERIFY_ONLY=0; DOWN=0; LIST_CA=0; PULL=0; CA_NAME=""; CA_FILE=""
 
 die()  { echo "error: $*" >&2; exit 1; }
 warn() { echo "warn: $*" >&2; }
 info() { echo "==> $*"; }
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --ca)       [ $# -ge 2 ] || die "--ca needs a name, e.g. --ca Zscaler"; CA_NAME="$2"; shift ;;
     --ca-file)  [ $# -ge 2 ] || die "--ca-file needs a path"; CA_FILE="$2"; shift ;;
     --list-ca)  LIST_CA=1 ;;
+    --pull)     PULL=1 ;;
     --rebuild)  REBUILD=1 ;;
     --verify)   VERIFY_ONLY=1 ;;
     --down)     DOWN=1 ;;
@@ -74,7 +76,9 @@ if [ -n "$CA_NAME" ] || [ -n "$CA_FILE" ]; then
   [ "$n" -le 5 ] || warn "$n certificates matched; the name may be too broad. Check $CA_OUT"
   install -m 0644 "$tmp" "$CA_OUT"
   info "wrote $n certificate(s) to $CA_OUT (git-ignored)"
-  REBUILD=1   # image trust store must be rebuilt
+  # A local build bakes the CA into the image trust store, so rebuild. A pulled image reads it at
+  # runtime from the mounted certs/ directory instead.
+  [ "$PULL" -eq 1 ] || REBUILD=1
   if [ "$(uname -s)" = "Darwin" ]; then
     echo "note: if podman image pulls fail with a certificate error, the Podman VM needs the CA too (see README)."
   fi
@@ -133,7 +137,8 @@ verify() {
   check "herdr installed"                           pass  $sb sh -c "command -v herdr"
   check "copilot installed"                         pass  $sb sh -c "command -v copilot"
   check "root filesystem mounted read-only"         pass  $sb sh -c "grep -qE '^[^ ]+ / [^ ]+ ro[, ]' /proc/mounts"
-  check "GitHub API reachable through proxy"        pass  $sb curl -sS -m 10 -o /dev/null https://api.github.com
+  # Trust bundle = system CAs + optional company CA from the mounted certs/ directory
+  check "GitHub API reachable through proxy"        pass  $sb sh -c 'cat /etc/ssl/certs/ca-certificates.crt /certs/corp-ca.crt > /tmp/bundle.crt 2>/dev/null; curl -sS -m 10 --cacert /tmp/bundle.crt -o /dev/null https://api.github.com'
   check "example.com blocked by proxy"              fail  $sb curl -sS -m 10 -o /dev/null https://example.com
   check "direct internet blocked (no proxy)"        fail  $sb curl -sS -m 5 --noproxy '*' -o /dev/null https://api.github.com
   check "no ~/.ssh in sandbox"                      fail  $sb sh -c "test -e \$HOME/.ssh"
@@ -150,13 +155,19 @@ fi
 info "creating workspace/"
 mkdir -p workspace
 
-if [ "$REBUILD" -eq 1 ]; then
-  info "building images (no cache)"
-  $COMPOSE build --no-cache
+if [ "$PULL" -eq 1 ]; then
+  info "pulling prebuilt sandbox image"
+  $COMPOSE pull sandbox || die "could not pull the image. Is the package public, or are you logged in? See README (Prebuilt image)"
+  info "starting containers"
+  $COMPOSE up -d
+else
+  if [ "$REBUILD" -eq 1 ]; then
+    info "building images (no cache)"
+    $COMPOSE build --no-cache
+  fi
+  info "building and starting containers"
+  $COMPOSE up -d --build
 fi
-
-info "building and starting containers"
-$COMPOSE up -d --build
 
 info "waiting for containers"
 for _ in $(seq 1 30); do
