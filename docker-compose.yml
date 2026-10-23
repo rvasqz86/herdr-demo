@@ -1,33 +1,17 @@
 services:
-  # Ollama in a container. On macOS this is CPU only (containers cannot use the Apple GPU).
-  # Only ollama has internet (for model pull). The sandbox cannot reach it directly.
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama:/root/.ollama
-    networks:
-      - backend    # model-proxy reaches it here; sandbox is NOT on this network
-      - egress     # internet, for model pull only
-    # Linux + NVIDIA only (container toolkit or CDI): uncomment for GPU.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-    restart: unless-stopped
-
-  # Only path from sandbox to Ollama: /v1/* (see nginx.conf). Blocks /api/pull, /api/delete, /api/create.
+  # Ollama runs NATIVELY on the Mac so it uses the Apple GPU (Metal). Containers cannot.
+  # This proxy is the only path from the sandbox to the host: /v1/* only.
   model-proxy:
     image: nginx:alpine
-    depends_on:
-      - ollama
+    environment:
+      # Podman: host.containers.internal (default). Docker Desktop:
+      #   OLLAMA_UPSTREAM=http://host.docker.internal:11434
+      OLLAMA_UPSTREAM: ${OLLAMA_UPSTREAM:-http://host.containers.internal:11434}
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks:
       - internal   # sandbox side
-      - backend    # ollama side
+      - hostnet    # host side (reaches native Ollama)
     restart: unless-stopped
 
   sandbox:
@@ -59,9 +43,4 @@ services:
 networks:
   internal:
     internal: true
-  backend:
-    internal: true
-  egress: {}
-
-volumes:
-  ollama:
+  hostnet: {}
