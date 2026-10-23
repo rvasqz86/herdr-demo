@@ -1,14 +1,13 @@
-FROM ubuntu:24.04
+# Node 22 base from the registry: avoids NodeSource (apt repo) which fails on restricted/intercepted networks.
+FROM node:22-bookworm-slim
+
+# Fail the build if any command in a pipe fails (curl | sh must not hide a failed download)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl git ca-certificates gnupg bash \
- && rm -rf /var/lib/apt/lists/*
-
-# Node 22+ is required by Copilot CLI (Ubuntu 24.04 apt ships an older Node)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
+ && apt-get install -y --no-install-recommends curl git ca-certificates bash \
  && rm -rf /var/lib/apt/lists/*
 
 # herdr: official install script puts the binary in ~/.local/bin of the installing user.
@@ -22,8 +21,11 @@ RUN curl -fsSL https://herdr.dev/install.sh | sh \
 # GitHub Copilot CLI (pin a version for demos: @github/copilot@<version>)
 RUN npm install -g @github/copilot
 
-# Non-root user. Home dir is created here so a named volume mounted on it inherits ownership.
-RUN useradd -m -u 1000 agent && mkdir -p /work && chown agent:agent /work
+# The node image ships a uid 1000 user named "node". Rename it to "agent" with home /home/agent
+# so a named volume mounted there inherits the right ownership.
+RUN groupmod -n agent node \
+ && usermod -l agent -d /home/agent -m node \
+ && mkdir -p /work && chown agent:agent /work
 USER agent
 WORKDIR /work
 
