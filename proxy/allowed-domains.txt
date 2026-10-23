@@ -12,6 +12,11 @@
 # Copilot experimentation service
 default.exp-tas.com
 
+# CodeRabbit CLI: dashboard, API and websocket live under coderabbit.ai. The docs name
+# app.coderabbit.ai and app.eu.coderabbit.ai but do not list the backend hosts, so the whole
+# domain is allowed. Remove this line to disable CodeRabbit.
+.coderabbit.ai
+
 # Optional: package registries so the agent can install dependencies.
 # Uncomment only what you need. Each one widens what the agent can reach.
 #registry.npmjs.org

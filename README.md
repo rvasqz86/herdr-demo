@@ -57,6 +57,28 @@ lazygit works for staging, diffs and local commits in `/work`. Set your git iden
 
 Pin versions for a repeatable demo: `podman build --build-arg LAZYGIT_VERSION=0.xx.y .` (default is the latest release at build time).
 
+## CodeRabbit CLI
+
+`coderabbit` (alias `cr`) is installed. Review local changes from a pane in your project:
+
+```bash
+cd /work/my-project
+cr review --uncommitted           # or: cr review --base main
+```
+
+**Login.** CodeRabbit documents no device-code login. Two options:
+
+1. **API key (works headless, recommended here):** create an **Agentic API key** in the CodeRabbit dashboard (app.coderabbit.ai; user API keys are rejected), then in a pane run `cr-login` (add `--region eu` for EU). It prompts for the key with hidden input, so it stays out of shell history, and runs `coderabbit auth login --api-key`. The CLI stores the login in the `agent-home` volume. Note the key is briefly a process argument inside the container.
+2. **Browser login:** `cr auth login`. Likely to hit the same problem Copilot's browser flow has, a `localhost` callback that lands on your Mac and not in the container. Untested here; if it prints a URL and never completes, use the API key.
+
+Check with `cr auth status`. Add `--agent` to `cr review` for output other tools (including copilot) can read.
+
+**Network.** CodeRabbit's docs name only `cli.coderabbit.ai`, `app.coderabbit.ai` and `app.eu.coderabbit.ai`, not the backend and websocket hosts, so `proxy/allowed-domains.txt` allows all of `.coderabbit.ai`. If a review hangs, check `podman compose logs egress-proxy | grep TCP_DENIED`.
+
+**Data.** A review sends your diff to CodeRabbit's service. Confirm that is approved for the code you review, the same as for Copilot. Remove `.coderabbit.ai` from the allowlist to disable it.
+
+Pin a version: `--build-arg CODERABBIT_VERSION=x.y.z` (plain version, no `v`).
+
 ## herdr config (baked in)
 
 Your [herdr-config](https://github.com/rvasqz86/herdr-config) repo (keybindings, `hq` launcher, roles) is cloned into the image at build time. On first start the container entrypoint installs it to `~/.config/herdr`, runs its `bin/bootstrap` (links `hq` into `~/.local/bin`, installs the herdr integration for `copilot`), and writes a `hq.local` that points every `hq` role at `copilot`, the only agent CLI in this image.

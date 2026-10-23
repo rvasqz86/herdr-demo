@@ -53,6 +53,16 @@ RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
 # GitHub Copilot CLI (pin a version for demos: @github/copilot@<version>)
 RUN npm install -g @github/copilot
 
+# CodeRabbit CLI (`coderabbit`, alias `cr`). The script installs to ~/.local/bin by default; put it
+# on the system PATH instead. Pin: --build-arg CODERABBIT_VERSION=x.y.z (plain version, no "v").
+ARG CODERABBIT_VERSION=
+RUN export CODERABBIT_INSTALL_DIR=/usr/local/bin \
+ && if [ -n "$CODERABBIT_VERSION" ]; then export CODERABBIT_VERSION; else unset CODERABBIT_VERSION; fi \
+ && curl -fsSL https://cli.coderabbit.ai/install.sh | sh \
+ && test -x /usr/local/bin/coderabbit
+COPY docker/cr-login /usr/local/bin/cr-login
+RUN chmod 0755 /usr/local/bin/cr-login
+
 # Bake the herdr config (keybindings, hq launcher, roles) into the image. It is public, so no
 # credentials are needed. The entrypoint installs it into ~/.config/herdr on first start, because
 # /home/agent is a persistent volume. Override: --build-arg HERDR_CONFIG_REPO=... HERDR_CONFIG_REF=<tag|branch>

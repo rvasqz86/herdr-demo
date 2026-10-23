@@ -139,7 +139,7 @@ verify() {
   check "herdr config installed (~/.config/herdr)"  pass  $sb sh -c 'test -d "$HOME/.config/herdr/.git"'
   check "interactive shell is bash (SHELL, login shell)" pass  $sb sh -c '[ "$SHELL" = /bin/bash ] && getent passwd agent | grep -q ":/bin/bash$"'
   check "hq launcher on PATH"                       pass  $sb sh -c 'command -v hq'
-  check "dev tools installed (nvim rg jq lazygit fd bat fzf)" pass  $sb sh -c 'for t in nvim rg jq lazygit fd bat fzf; do command -v $t >/dev/null || exit 1; done'
+  check "dev tools installed (nvim rg jq lazygit fd bat fzf coderabbit)" pass  $sb sh -c 'for t in nvim rg jq lazygit fd bat fzf coderabbit; do command -v $t >/dev/null || exit 1; done'
   check "root filesystem mounted read-only"         pass  $sb sh -c "grep -qE '^[^ ]+ / [^ ]+ ro[, ]' /proc/mounts"
   # Trust bundle = system CAs + optional company CA from the mounted certs/ directory
   check "GitHub API reachable through proxy"        pass  $sb sh -c 'cat /etc/ssl/certs/ca-certificates.crt /certs/corp-ca.crt > /tmp/bundle.crt 2>/dev/null; curl -sS -m 10 --cacert /tmp/bundle.crt -o /dev/null https://api.github.com'

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# cr-login — sign in to the CodeRabbit CLI with an Agentic API key, without putting the key in
+# shell history. Usage: cr-login [--region eu]
+set -euo pipefail
+
+region=()
+if [ "${1:-}" = "--region" ]; then
+  [ -n "${2:-}" ] || { echo "usage: cr-login [--region eu]" >&2; exit 2; }
+  region=(--region "$2")
+fi
+
+printf 'CodeRabbit Agentic API key (input hidden): '
+IFS= read -rs key
+echo
+[ -n "$key" ] || { echo "no key entered" >&2; exit 1; }
+
+coderabbit auth login "${region[@]}" --api-key "$key"
+unset key
+coderabbit auth status
