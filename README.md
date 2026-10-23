@@ -29,6 +29,8 @@ docker compose up -d --build           # or: podman compose up -d --build
 docker compose exec -it sandbox herdr
 ```
 
+`pick-model.sh` options: `-n` dry run, `-s 7b` force a size, `-f llama3.1` other family, `RAM_GB=16` override memory. It starts `ollama serve` if needed, checks disk space, and falls back to a smaller size if a pull fails.
+
 If the proxy cannot reach Ollama (`502`), start Ollama with `OLLAMA_HOST=0.0.0.0 ollama serve`. This exposes it on your LAN, so enable the macOS firewall.
 
 Detach herdr; agents keep running. Reattach with the same `exec` command.
