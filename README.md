@@ -1,80 +1,65 @@
 # herdr-demo
 
-Sandboxed AI coding agent environment for Apple silicon: [herdr](https://github.com/creator-engine/herdr-ce) (terminal agent multiplexer) + local model on **native Ollama (Metal GPU)**. The agent container has no internet. Its only network path is an nginx proxy to the host's Ollama `/v1/*` API.
+Sandboxed AI coding agent: [herdr](https://github.com/creator-engine/herdr-ce) (terminal agent multiplexer) running GitHub Copilot CLI inside a locked-down container. The container has no direct internet. Its only exit is a Squid proxy that allows HTTPS to GitHub and Copilot domains.
 
 ```
-sandbox --(internal net, no internet)--> model-proxy (nginx, /v1/* only) --> host Ollama (Metal)
+sandbox --(internal net, no route out)--> egress-proxy (Squid, domain allowlist) --> GitHub / Copilot only
 ```
 
 ## Layout
 
-- `docker-compose.yml`: `model-proxy` (nginx) + `sandbox` (internal network only)
-- `nginx/default.conf.template`: allows `/v1/*` only; upstream set by `OLLAMA_UPSTREAM`
-- `Dockerfile`: sandbox image with herdr and opencode, non-root user
-- `pick-model.sh`: picks model size from unified memory, pulls with native Ollama
-- `workspace/`: only directory the agent can write
+- `docker-compose.yml`: `egress-proxy` (Squid) + `sandbox`
+- `proxy/squid.conf`, `proxy/allowed-domains.txt`: the allowlist
+- `Dockerfile`: Node 22, herdr, `@github/copilot`, non-root user
+- `workspace/`: only host directory the agent can write
 
-## Why native Ollama
+## Prereqs
 
-Containers on macOS run in a Linux VM with no access to the Apple GPU. Ollama in a container is CPU only and slow. Native Ollama uses Metal.
+- Podman (or Docker) with compose, already running
+- An active Copilot seat. If the company manages Copilot, the org must enable the Copilot CLI policy.
 
-## Run (Podman)
+## Run
 
 ```bash
-brew install ollama podman podman-compose
-podman machine start                       # if not already running
 mkdir -p workspace
-./pick-model.sh                            # starts Ollama, pulls a fitting model, verifies it runs on GPU
-podman compose up -d --build
+podman compose up -d --build        # or: docker compose up -d --build
 podman compose exec -it sandbox herdr
 ```
 
-Docker Desktop instead: `export OLLAMA_UPSTREAM=http://host.docker.internal:11434` and use `docker compose`.
+In a herdr pane, run `copilot`, then `/login` and follow the device-flow prompts. The login is kept in the `agent-home` volume. Work happens in `/work` (your `workspace/`).
 
-`pick-model.sh` options: `-n` dry run, `-s 7b` force starting size, `-f llama3.1` other family, `-k` skip the GPU check, `RAM_GB=16` override memory. It starts `ollama serve` with light settings (`KEEP_ALIVE=2m`, one parallel request, one loaded model) if Ollama is not running, checks disk, and falls back to a smaller size if a pull fails.
+Optional PAT instead of `/login`: fine-grained token with **Copilot Requests**, owned by a personal account (not an organization). Pass it with `podman compose run -e COPILOT_GITHUB_TOKEN=... sandbox`. The agent can read it, so use a short-lived token. If your seat is through the company, use `/login`.
 
-GPU check: after pulling, the script loads the model with a 1-token request and reads `ollama ps`. If the PROCESSOR column is not `100% GPU` (model spilled to CPU), it unloads it and tries the next smaller size. It only enforces this on Apple silicon or NVIDIA hosts.
-
-## If the proxy cannot reach Ollama (502)
-
-Ollama listens on `127.0.0.1` by default. Podman and Docker usually forward `host.*.internal` to the Mac's loopback. If not, restart Ollama on all interfaces and enable the macOS firewall:
+## Verify the sandbox
 
 ```bash
-OLLAMA_HOST=0.0.0.0 ollama serve
+podman compose exec sandbox id                                            # non-root, uid 1000
+podman compose exec sandbox curl -sS -m5 -I https://api.github.com        # works via proxy
+podman compose exec sandbox curl -sS -m5 -I https://example.com           # must fail (403 from proxy)
+podman compose exec sandbox curl -sS -m5 --noproxy '*' -I https://api.github.com   # must fail (no route)
+podman compose exec sandbox ls ~/.ssh                                     # must not exist
 ```
 
-## Verify
+## Tune the allowlist
+
+Watch what the proxy blocks while using Copilot:
 
 ```bash
-ollama ps                                                                # 100% GPU
-podman compose exec sandbox id                                           # non-root
-podman compose exec sandbox curl -m3 https://example.com                 # must fail
-podman compose exec sandbox curl -m3 http://model-proxy:11434/v1/models  # must work
-podman compose exec sandbox curl -m3 http://model-proxy:11434/api/tags   # must be 403
-podman compose exec sandbox ls ~/.ssh                                    # must not exist
+podman compose logs -f egress-proxy | grep -E 'TCP_DENIED'
 ```
 
-## Keep the Mac responsive
-
-| Mac RAM | Comfortable model |
-|---|---|
-| 8GB | 1.5b to 3b |
-| 16GB | 7b |
-| 32GB | 14b |
-| 64GB+ | 32b |
-
-Keep agent context at 8k to 16k. Large context grows memory fast. Watch the Memory pressure graph in Activity Monitor; red means pick a smaller model.
+Add needed domains to `proxy/allowed-domains.txt`, then `podman compose restart egress-proxy`. The starting list follows GitHub's Copilot allowlist reference. Package registries (npm, PyPI) are commented out; enable only what the demo needs.
 
 ## Security notes
 
 - Container isolation, not VM isolation: shared kernel inside the Podman/Docker VM. The VM is a boundary from macOS.
-- The proxy blocks pull, delete and create on the Ollama API, but host Ollama itself is reachable by anything else on the host.
-- Review `git diff` on the host before running anything the agent wrote (hooks, Makefile, scripts).
-- `podman compose` may ignore some options (`read_only`, tmpfs uid, limits). Check with `podman inspect`.
+- Allowlisting `*.githubusercontent.com` and `github.com` lets the agent reach any public GitHub content. It cannot push anywhere without credentials, but treat anything it can read as reachable.
+- Code context is sent to GitHub Copilot. Confirm that is approved for the repository contents.
+- Review `git diff` on the host before running anything the agent wrote (hooks, Makefile, scripts). Commit and push from the host.
+- `podman compose` may ignore some options (`read_only`, limits). Check with `podman inspect`.
 
 ## TODO before first build
 
-- Confirm herdr install command on herdr.dev; the URL in `Dockerfile` is unverified.
-- Confirm the `opencode-ai` npm package name.
-- Configure opencode to use `OPENAI_BASE_URL` and the model in `.model`.
-- Pin base image digest and tool versions.
+- Confirm the herdr install command on herdr.dev; the URL in `Dockerfile` is unverified.
+- Confirm Copilot CLI honors the proxy variables. `NODE_USE_ENV_PROXY=1` is set for Node's fetch; if requests fail, check the proxy log.
+- Pin the base image digest, `@github/copilot` version and herdr version.

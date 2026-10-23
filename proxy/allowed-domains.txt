@@ -1,0 +1,19 @@
+# Allowed domains for Copilot CLI. Leading dot = domain and all subdomains.
+# Source: GitHub Docs, "Copilot allowlist reference". Re-check when Copilot changes.
+
+# GitHub: login, API, copilot_internal, collector, git over HTTPS
+.github.com
+.githubusercontent.com
+.githubassets.com
+
+# Copilot service endpoints (api.*, individual / business / enterprise)
+.githubcopilot.com
+
+# Copilot experimentation service
+default.exp-tas.com
+
+# Optional: package registries so the agent can install dependencies.
+# Uncomment only what you need. Each one widens what the agent can reach.
+#registry.npmjs.org
+#pypi.org
+#files.pythonhosted.org

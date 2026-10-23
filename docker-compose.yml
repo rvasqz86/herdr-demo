@@ -1,30 +1,31 @@
 services:
-  # Ollama runs NATIVELY on the Mac so it uses the Apple GPU (Metal). Containers cannot.
-  # This proxy is the only path from the sandbox to the host: /v1/* only.
-  model-proxy:
-    image: nginx:alpine
-    environment:
-      # Podman: host.containers.internal (default). Docker Desktop:
-      #   OLLAMA_UPSTREAM=http://host.docker.internal:11434
-      OLLAMA_UPSTREAM: ${OLLAMA_UPSTREAM:-http://host.containers.internal:11434}
+  # Only exit to the internet. Allows HTTPS CONNECT to domains in proxy/allowed-domains.txt, nothing else.
+  egress-proxy:
+    image: ubuntu/squid:latest
     volumes:
-      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./proxy/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
     networks:
       - internal   # sandbox side
-      - hostnet    # host side (reaches native Ollama)
+      - egress     # internet side
     restart: unless-stopped
 
   sandbox:
     build: .
     depends_on:
-      - model-proxy
+      - egress-proxy
     environment:
-      OPENAI_BASE_URL: http://model-proxy:11434/v1
-      OPENAI_API_KEY: ollama
+      HTTPS_PROXY: http://egress-proxy:3128
+      HTTP_PROXY: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1
+      NODE_USE_ENV_PROXY: "1"   # make Node's fetch honor the proxy variables
     volumes:
-      - ./workspace:/work     # only thing agent can touch
+      - ./workspace:/work       # only host dir the agent can touch
+      - agent-home:/home/agent  # login (/login) and herdr state persist here
     networks:
-      - internal              # no internet
+      - internal                # no direct route to the internet
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -34,8 +35,6 @@ services:
     cpus: 2
     tmpfs:
       - /tmp
-      - /home/agent/.local/state:uid=1000,gid=1000
-      - /home/agent/.cache:uid=1000,gid=1000
     stdin_open: true
     tty: true
     restart: unless-stopped
@@ -43,4 +42,7 @@ services:
 networks:
   internal:
     internal: true
-  hostnet: {}
+  egress: {}
+
+volumes:
+  agent-home:
