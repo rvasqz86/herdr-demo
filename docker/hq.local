@@ -1,0 +1,13 @@
+# hq.local for the sandbox image: the only agent CLI installed here is copilot.
+# Edit ~/.config/herdr/hq.local inside the container to change; it is not overwritten on restart.
+code_tools=copilot
+docs_writer=copilot
+docs_reviewer=copilot
+kind_manager=copilot
+kind_planner=copilot
+kind_specrev=copilot
+kind_impl=copilot
+kind_taskrev=copilot
+kind_ceo=copilot
+kind_cto=copilot
+kind_coo=copilot

@@ -53,6 +53,23 @@ RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
 # GitHub Copilot CLI (pin a version for demos: @github/copilot@<version>)
 RUN npm install -g @github/copilot
 
+# Bake the herdr config (keybindings, hq launcher, roles) into the image. It is public, so no
+# credentials are needed. The entrypoint installs it into ~/.config/herdr on first start, because
+# /home/agent is a persistent volume. Override: --build-arg HERDR_CONFIG_REPO=... HERDR_CONFIG_REF=<tag|branch>
+ARG HERDR_CONFIG_REPO=https://github.com/rvasqz86/herdr-config.git
+ARG HERDR_CONFIG_REF=
+RUN git clone --depth 1 ${HERDR_CONFIG_REF:+--branch "$HERDR_CONFIG_REF"} "$HERDR_CONFIG_REPO" /opt/herdr-config \
+ && git -C /opt/herdr-config rev-parse HEAD > /opt/herdr-config.rev \
+ && chmod -R a+rX /opt/herdr-config /opt/herdr-config.rev \
+ && test -x /opt/herdr-config/bin/bootstrap
+
+COPY docker/hq.local /usr/local/share/herdr-demo/hq.local
+COPY docker/entrypoint.sh /usr/local/bin/sandbox-entrypoint
+RUN chmod 0755 /usr/local/bin/sandbox-entrypoint
+
+# hq is linked into ~/.local/bin by the config's bootstrap script
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
 # The node image ships a uid 1000 user named "node". Rename it to "agent" with home /home/agent
 # so a named volume mounted there inherits the right ownership.
 RUN groupmod -n agent node \
@@ -61,4 +78,5 @@ RUN groupmod -n agent node \
 USER agent
 WORKDIR /work
 
+ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint"]
 CMD ["sleep", "infinity"]

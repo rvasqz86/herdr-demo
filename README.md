@@ -57,6 +57,16 @@ lazygit works for staging, diffs and local commits in `/work`. Set your git iden
 
 Pin versions for a repeatable demo: `podman build --build-arg LAZYGIT_VERSION=0.xx.y .` (default is the latest release at build time).
 
+## herdr config (baked in)
+
+Your [herdr-config](https://github.com/rvasqz86/herdr-config) repo (keybindings, `hq` launcher, roles) is cloned into the image at build time. On first start the container entrypoint installs it to `~/.config/herdr`, runs its `bin/bootstrap` (links `hq` into `~/.local/bin`, installs the herdr integration for `copilot`), and writes a `hq.local` that points every `hq` role at `copilot`, the only agent CLI in this image.
+
+- `hq code|docs|team|exec` and the `ctrl+alt+n` picker are available inside herdr. Roles that default to claude, omp or cursor use copilot instead.
+- The config is installed once. After that it belongs to the `agent-home` volume: update it with `git -C ~/.config/herdr pull` (works through the proxy, github.com is allowed), or delete `~/.config/herdr` in the container and restart it to re-seed from the image.
+- If an older default config already existed in the volume, it is moved to `~/.config/herdr.orig.<timestamp>`.
+- `hq team` creates branches and commits in your project, so set your git identity once in the container. Upstream notes that `hq team` has only been tried with Claude as the manager; copilot as manager is untested.
+- Pin or change the source: `--build-arg HERDR_CONFIG_REF=<tag-or-branch>` or `HERDR_CONFIG_REPO=<url>`. The build needs the repo to be public. If you make it private, the build and the prebuilt-image workflow will fail at the clone step.
+
 ## Prebuilt image (skip the local build)
 
 GitHub Actions builds the sandbox image for `linux/arm64` (Apple silicon) and `linux/amd64` on every change to the `Dockerfile` and publishes it to `ghcr.io/rvasqz86/herdr-demo-sandbox`. Use it when building locally fails because your network blocks the build-time downloads:
