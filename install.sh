@@ -137,6 +137,7 @@ verify() {
   check "herdr installed"                           pass  $sb sh -c "command -v herdr"
   check "copilot installed"                         pass  $sb sh -c "command -v copilot"
   check "herdr config installed (~/.config/herdr)"  pass  $sb sh -c 'test -d "$HOME/.config/herdr/.git"'
+  check "interactive shell is bash (SHELL, login shell)" pass  $sb sh -c '[ "$SHELL" = /bin/bash ] && getent passwd agent | grep -q ":/bin/bash$"'
   check "hq launcher on PATH"                       pass  $sb sh -c 'command -v hq'
   check "dev tools installed (nvim rg jq lazygit fd bat fzf)" pass  $sb sh -c 'for t in nvim rg jq lazygit fd bat fzf; do command -v $t >/dev/null || exit 1; done'
   check "root filesystem mounted read-only"         pass  $sb sh -c "grep -qE '^[^ ]+ / [^ ]+ ro[, ]' /proc/mounts"

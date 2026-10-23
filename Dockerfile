@@ -67,13 +67,17 @@ COPY docker/hq.local /usr/local/share/herdr-demo/hq.local
 COPY docker/entrypoint.sh /usr/local/bin/sandbox-entrypoint
 RUN chmod 0755 /usr/local/bin/sandbox-entrypoint
 
+# Interactive shell setup. `exec` sessions do not set SHELL, so herdr panes could fall back to
+# /bin/sh (no line editing: the up arrow prints ^[[A). Point everything at bash with a UTF-8 locale.
+ENV SHELL=/bin/bash LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # hq is linked into ~/.local/bin by the config's bootstrap script
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # The node image ships a uid 1000 user named "node". Rename it to "agent" with home /home/agent
 # so a named volume mounted there inherits the right ownership.
 RUN groupmod -n agent node \
- && usermod -l agent -d /home/agent -m node \
+ && usermod -l agent -d /home/agent -m -s /bin/bash node \
  && mkdir -p /work && chown agent:agent /work
 USER agent
 WORKDIR /work
