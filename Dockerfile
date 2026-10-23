@@ -6,8 +6,14 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+# Core + common CLI tools from Debian. fd and bat get friendlier names below.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl git ca-certificates bash \
+ && apt-get install -y --no-install-recommends \
+      curl wget git ca-certificates bash ncurses-term \
+      jq ripgrep fd-find fzf bat tree less nano htop procps file \
+      unzip zip make \
+ && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+ && ln -s /usr/bin/batcat /usr/local/bin/bat \
  && rm -rf /var/lib/apt/lists/*
 
 # Optional company root CA(s): put *.crt files in certs/ (see README). Keeps TLS verification ON
@@ -26,6 +32,23 @@ RUN curl -fsSL https://herdr.dev/install.sh | sh \
  && test -n "${BIN:-}" \
  && { [ "$BIN" = /usr/local/bin/herdr ] || install -m 0755 "$BIN" /usr/local/bin/herdr; } \
  && test -x /usr/local/bin/herdr
+
+# Neovim and lazygit: Debian's neovim is too old and lazygit is not packaged, so use release builds.
+# TARGETARCH is set by buildx/podman (amd64 or arm64). Pin for demos: --build-arg LAZYGIT_VERSION=x.y.z
+ARG TARGETARCH
+ARG LAZYGIT_VERSION=
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+      amd64) ARCH=x86_64 ;; \
+      arm64) ARCH=arm64 ;; \
+      *) echo "unsupported architecture: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${ARCH}.tar.gz" | tar -xz -C /opt \
+ && ln -s "/opt/nvim-linux-${ARCH}/bin/nvim" /usr/local/bin/nvim \
+ && LG="${LAZYGIT_VERSION:-$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/jesseduffield/lazygit/releases/latest | sed 's#.*/tag/v##')}" \
+ && [[ "$LG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+ && curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG}/lazygit_${LG}_Linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin lazygit \
+ && nvim --version | head -1 \
+ && lazygit --version | head -1
 
 # GitHub Copilot CLI (pin a version for demos: @github/copilot@<version>)
 RUN npm install -g @github/copilot

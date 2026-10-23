@@ -49,6 +49,14 @@ podman compose exec sandbox curl -sS -m5 --noproxy '*' -I https://api.github.com
 podman compose exec sandbox ls ~/.ssh                                     # must not exist
 ```
 
+## Tools in the image
+
+Agents and you inside the sandbox have: `nvim` (release build), `lazygit` (release build), `rg`, `fd`, `fzf`, `bat`, `jq`, `git`, `curl`, `wget`, `tree`, `less`, `nano`, `htop`, `unzip`, `zip`, `make`, plus `herdr` and `copilot`. Node 22 is there for Copilot. Not included: compilers (`build-essential`), Python, `gh`, `ssh`. Add them to the `Dockerfile` if a demo needs them. `ssh` and `gh` are left out on purpose so the sandbox has no way to push with your credentials.
+
+lazygit works for staging, diffs and local commits in `/work`. Set your git identity once inside the container (`git config --global user.name ...`, `user.email ...`); it persists in the `agent-home` volume. Push from the host.
+
+Pin versions for a repeatable demo: `podman build --build-arg LAZYGIT_VERSION=0.xx.y .` (default is the latest release at build time).
+
 ## Prebuilt image (skip the local build)
 
 GitHub Actions builds the sandbox image for `linux/arm64` (Apple silicon) and `linux/amd64` on every change to the `Dockerfile` and publishes it to `ghcr.io/rvasqz86/herdr-demo-sandbox`. Use it when building locally fails because your network blocks the build-time downloads:
